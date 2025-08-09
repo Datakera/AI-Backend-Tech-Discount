@@ -1,0 +1,5 @@
+# Ignorar entorno virtual
+.venv/
+
+# Ignorar configuración de JetBrains IDEs
+.idea/
