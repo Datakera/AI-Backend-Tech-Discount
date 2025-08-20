@@ -122,3 +122,14 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# MongoDB Configuration
+import os
+from dotenv import load_dotenv
+
+
+# Cargar variables de entorno desde el archivo .env
+load_dotenv()
+
+MONGODB_CONNECTION_STRING = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'alkosto_db')
