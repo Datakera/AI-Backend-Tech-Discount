@@ -1,3 +1,4 @@
+from typing import Optional
 from selenium import webdriver
 from selenium.common import TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -6,7 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import time
-from datetime import datetime
+from core.Mongo.Schemas import ProductBase
 
 class AlkostoScraper:
     def __init__(self):
@@ -109,7 +110,7 @@ class AlkostoScraper:
             driver.quit()
 
     def scrape_products(self, url, category=None):
-        """Scrapea productos de una URL específica"""
+        """Scrapea productos de una URL específica y devuelve objetos ProductBase"""
         html_content, error = self.get_content_selenium(url)
 
         if error:
@@ -133,8 +134,8 @@ class AlkostoScraper:
 
         return product_info_list, None
 
-    def extract_product_data(self, item, source_url, forced_category=None):
-        """Extrae datos de un producto individual"""
+    def extract_product_data(self, item, source_url, forced_category=None) -> Optional[ProductBase]:
+        """Extrae datos de un producto individual y devuelve ProductBase"""
         # Extraer información básica
         name_tag = item.find('h3', class_=['product__item__top__title', 'js-algolia-product-click',
                                            'js-algolia-product-title'])
@@ -169,6 +170,10 @@ class AlkostoScraper:
         old_price_text = old_price_tag.get_text(strip=True) if old_price_tag else "Sin descuento"
         discount_price_text = discount_price_tag.get_text(strip=True) if discount_price_tag else "0"
 
+        # Limpiar precios para valores numéricos
+        original_price_num = self.clean_price(old_price_text)
+        discount_price_num = self.clean_price(discount_price_text)
+
         # Imagen
         img_c_div = item.find('div', class_='product__item__information__image js-algolia-product-click')
         image_tag = img_c_div.find('img') if img_c_div else None
@@ -194,23 +199,25 @@ class AlkostoScraper:
         category = forced_category if forced_category else self.extract_category_from_url(product_url or source_url)
 
         # Disponibilidad (inferir)
-        availability = "Disponible"  # Puedes añadir lógica para detectar "Agotado"
+        availability = "Disponible"
+        in_stock = "agotado" not in availability.lower()
 
-        return {
-            'name': name,
-            'brand': brand,
-            'category': category,
-            'product_url': product_url,
-            'source_url': source_url,
-            'discount_percent': discount_percent,
-            'rating': rating,
-            'original_price': old_price_text,
-            'original_price_num': self.clean_price(old_price_text),
-            'discount_price': discount_price_text,
-            'discount_price_num': self.clean_price(discount_price_text),
-            'image_url': image_url,
-            'specifications': specifications,
-            'availability': availability,
-            'scraping_date': datetime.now().isoformat(),
-            'source': 'alkosto'
-        }
+        # Crear y retornar objeto ProductBase
+        return ProductBase(
+            name=name,
+            brand=brand,
+            category=category,
+            product_url=product_url,
+            source_url=source_url,
+            discount_percent=discount_percent,
+            rating=rating,
+            original_price=old_price_text,
+            original_price_num=original_price_num,
+            discount_price=discount_price_text,
+            discount_price_num=discount_price_num,
+            image_url=image_url,
+            specifications=specifications,
+            availability=availability,
+            in_stock=in_stock,
+            source='alkosto'
+        )

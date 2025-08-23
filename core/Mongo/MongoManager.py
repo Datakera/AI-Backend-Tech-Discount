@@ -1,8 +1,13 @@
+# core/Mongo/MongoManager.py
 import pymongo
 from pymongo import MongoClient, UpdateOne
 from datetime import datetime, timedelta
 import logging
-from typing import List, Dict, Any
+from typing import List, Optional
+from bson import ObjectId
+
+# Importar los schemas Pydantic
+from .schemas import ProductBase, ProductResponse, ProductUpdate
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -70,12 +75,12 @@ class MongoManager:
             except Exception as e:
                 logger.warning(f"⚠️ Error creando índice: {e}")
 
-    def save_products(self, products: List[Dict[str, Any]], category: str = None):
+    def save_products(self, products: List[ProductBase], category: str = None) -> int:
         """
-        Guarda productos en MongoDB, actualizando existentes
+        Guarda productos validados con Pydantic en MongoDB
 
         Args:
-            products: Lista de diccionarios con datos de productos
+            products: Lista de objetos ProductBase
             category: Categoría de los productos (opcional)
         """
         if not products:
@@ -84,59 +89,65 @@ class MongoManager:
 
         try:
             operations = []
-            saved_count = 0
-            updated_count = 0
 
             for product in products:
-                # Añadir timestamp y categoría si se proporciona
-                product['last_updated'] = datetime.now()
-                if category and 'category' not in product:
-                    product['category'] = category
+                # Convertir el modelo Pydantic a dict
+                product_dict = product.dict()
+                product_dict['last_updated'] = datetime.now()
 
-                # Crear operación de upsert (insertar o actualizar)
+                # Sobrescribir categoría si se proporciona
+                if category:
+                    product_dict['category'] = category
+
+                # Crear operación de upsert
                 operation = UpdateOne(
-                    {'product_url': product['product_url']},  # Filtro por URL única
-                    {'$set': product},  # Datos a actualizar
-                    upsert=True  # Insertar si no existe
+                    {'product_url': product_dict['product_url']},
+                    {'$set': product_dict},
+                    upsert=True
                 )
                 operations.append(operation)
 
             # Ejecutar operaciones en lote
             if operations:
                 result = self.products_collection.bulk_write(operations)
-                saved_count = result.upserted_count
-                updated_count = result.modified_count
+                total = result.upserted_count + result.modified_count
+                logger.info(
+                    f"💾 Guardados: {result.upserted_count} nuevos, Actualizados: {result.modified_count} productos")
+                return total
 
-                logger.info(f"💾 Guardados: {saved_count} nuevos, Actualizados: {updated_count} productos")
-
-            return saved_count + updated_count
+            return 0
 
         except Exception as e:
             logger.error(f"❌ Error guardando productos: {e}")
             return 0
 
-    def get_product_by_url(self, product_url: str):
-        """Obtiene un producto por su URL"""
+    def get_product_by_url(self, product_url: str) -> Optional[ProductResponse]:
+        """Obtiene un producto por su URL (devuelve objeto ProductResponse)"""
         try:
-            return self.products_collection.find_one({'product_url': product_url})
+            product_data = self.products_collection.find_one({'product_url': product_url})
+            if product_data:
+                return ProductResponse(**product_data)
+            return None
         except Exception as e:
             logger.error(f"❌ Error obteniendo producto: {e}")
             return None
 
-    def get_products_by_category(self, category: str, limit: int = 100):
-        """Obtiene productos por categoría"""
+    def get_products_by_category(self, category: str, limit: int = 100) -> List[ProductResponse]:
+        """Obtiene productos por categoría (devuelve lista de ProductResponse)"""
         try:
-            return list(self.products_collection.find(
+            products_data = list(self.products_collection.find(
                 {'category': category}
             ).sort('scraping_date', -1).limit(limit))
+
+            return [ProductResponse(**product) for product in products_data]
         except Exception as e:
             logger.error(f"❌ Error obteniendo productos por categoría: {e}")
             return []
 
-    def get_products_with_discount(self, min_discount: float = 10, limit: int = 50):
+    def get_products_with_discount(self, min_discount: float = 10, limit: int = 50) -> List[ProductResponse]:
         """Obtiene productos con descuento mínimo"""
         try:
-            return list(self.products_collection.find({
+            products_data = list(self.products_collection.find({
                 'discount_percent': {'$ne': "0%"},
                 'discount_price_num': {'$gt': 0},
                 'original_price_num': {'$gt': 0},
@@ -147,22 +158,26 @@ class MongoManager:
                     ]
                 }
             }).sort('discount_percent', -1).limit(limit))
+
+            return [ProductResponse(**product) for product in products_data]
         except Exception as e:
             logger.error(f"❌ Error obteniendo productos con descuento: {e}")
             return []
 
-    def search_products(self, search_term: str, limit: int = 50):
+    def search_products(self, search_term: str, limit: int = 50) -> List[ProductResponse]:
         """Busca productos por texto"""
         try:
-            return list(self.products_collection.find(
+            products_data = list(self.products_collection.find(
                 {'$text': {'$search': search_term}},
                 {'score': {'$meta': 'textScore'}}
             ).sort([('score', {'$meta': 'textScore'})]).limit(limit))
+
+            return [ProductResponse(**product) for product in products_data]
         except Exception as e:
             logger.error(f"❌ Error buscando productos: {e}")
             return []
 
-    def get_product_count(self):
+    def get_product_count(self) -> int:
         """Obtiene el número total de productos"""
         try:
             return self.products_collection.count_documents({})
@@ -170,7 +185,7 @@ class MongoManager:
             logger.error(f"❌ Error contando productos: {e}")
             return 0
 
-    def get_categories(self):
+    def get_categories(self) -> List[str]:
         """Obtiene lista de categorías únicas"""
         try:
             return self.products_collection.distinct('category')
@@ -178,7 +193,23 @@ class MongoManager:
             logger.error(f"❌ Error obteniendo categorías: {e}")
             return []
 
-    def delete_old_products(self, days_old: int = 30):
+    def update_product(self, product_url: str, update_data: ProductUpdate) -> bool:
+        """Actualiza un producto específico"""
+        try:
+            update_dict = update_data.dict(exclude_unset=True)
+            update_dict['last_updated'] = datetime.now()
+
+            result = self.products_collection.update_one(
+                {'product_url': product_url},
+                {'$set': update_dict}
+            )
+
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"❌ Error actualizando producto: {e}")
+            return False
+
+    def delete_old_products(self, days_old: int = 30) -> int:
         """Elimina productos más viejos que X días"""
         try:
             cutoff_date = datetime.now() - timedelta(days=days_old)

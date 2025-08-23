@@ -1,3 +1,4 @@
+pydantic
 python-dotenv
 pymongo==4.14.1
 dnspython==2.7.0
