@@ -7,7 +7,45 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import time
-from core.Mongo.Schemas import ProductBase
+from core.mongo.Schemas import ProductBase
+
+
+def has_real_discount(discount_percent, original_price_num, discount_price_num):
+    """
+    Verifica si el producto tiene un descuento real y significativo
+    """
+    # Caso 1: No hay información de descuento
+    if not discount_percent or discount_percent == "0%":
+        return False
+
+    # Caso 2: El texto de descuento no contiene números (ej: "Oferta" sin porcentaje)
+    if not any(char.isdigit() for char in discount_percent):
+        return False
+
+    # Caso 3: Los precios son iguales (no hay descuento real)
+    if original_price_num == discount_price_num:
+        return False
+
+    # Caso 4: El precio "descuento" es mayor que el original (error de datos)
+    if discount_price_num > original_price_num > 0:
+        return False
+
+    # Caso 5: El descuento es muy pequeño (< 5%)
+    try:
+        # Extraer el valor numérico del porcentaje
+        discount_value = float(''.join([c for c in discount_percent if c.isdigit()]))
+        if discount_value < 5:  # Menos del 5% de descuento
+            return False
+    except (ValueError, TypeError):
+        return False
+
+    # Caso 6: Falta precio original, pero hay "descuento"
+    if original_price_num <= 0 < discount_price_num:
+        return False
+
+    # Si pasa todas las validaciones, es un descuento real
+    return True
+
 
 class AlkostoScraper:
     def __init__(self):
@@ -84,9 +122,13 @@ class AlkostoScraper:
                 print("Timeout: No se encontraron productos")
                 return None, "No se encontraron productos"
 
-            # Clicks en "Mostrar más"
+            # Lógica para clicks - si clicks es None, sigue hasta el final
             click_count = 0
-            while click_count < clicks:
+            while True:
+                # Si clicks no es None y ya alcanzamos el límite, salir
+                if clicks is not None and click_count >= clicks:
+                    break
+
                 try:
                     boton = WebDriverWait(driver, 5).until(
                         EC.element_to_be_clickable((By.CSS_SELECTOR,
@@ -96,7 +138,7 @@ class AlkostoScraper:
                     click_count += 1
                     print(f"📋 Click #{click_count} en 'Mostrar más'")
                     time.sleep(2)
-                except Exception:
+                except Exception as e:
                     print(f"✅ Fin de los productos ({click_count} clicks realizados)")
                     break
 
@@ -109,9 +151,9 @@ class AlkostoScraper:
         finally:
             driver.quit()
 
-    def scrape_products(self, url, category=None):
+    def scrape_products(self, url, category=None, clicks = None):
         """Scrapea productos de una URL específica y devuelve objetos ProductBase"""
-        html_content, error = self.get_content_selenium(url)
+        html_content, error = self.get_content_selenium(url,clicks=clicks)
 
         if error:
             return [], error
@@ -173,6 +215,11 @@ class AlkostoScraper:
         # Limpiar precios para valores numéricos
         original_price_num = self.clean_price(old_price_text)
         discount_price_num = self.clean_price(discount_price_text)
+
+        # 🔍 FILTRAR PRODUCTOS SIN DESCUENTO REAL
+        if not has_real_discount(discount_percent, original_price_num, discount_price_num):
+            print(f"⏭️  Saltando producto sin descuento: {name[:50]}...")
+            return None
 
         # Imagen
         img_c_div = item.find('div', class_='product__item__information__image js-algolia-product-click')

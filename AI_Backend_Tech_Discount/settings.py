@@ -131,5 +131,9 @@ from dotenv import load_dotenv
 # Cargar variables de entorno desde el archivo .env
 load_dotenv()
 
+#Cargar mongo
 MONGODB_CONNECTION_STRING = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
 MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'alkosto_db')
+
+# Configuración de OpenAI
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')

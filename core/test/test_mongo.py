@@ -1,7 +1,7 @@
 from django.test import TestCase
 from django.conf import settings
 import pymongo
-from core.Mongo.MongoManager import MongoManager
+from core.mongo.MongoManager import MongoManager
 
 
 class MongoDBConnectionTest(TestCase):

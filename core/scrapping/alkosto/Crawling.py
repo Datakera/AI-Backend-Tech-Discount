@@ -1,13 +1,14 @@
 import time
 
-from core.Mongo.MongoManager import MongoManager
+from core.mongo.MongoManager import MongoManager
 from core.scrapping.alkosto.Scrapping import AlkostoScraper
 
 
 class AlkostoCrawler:
-    def __init__(self):
+    def __init__(self, clicks = None):
         self.scraper = AlkostoScraper()
-        self.mongo_manager = MongoManager()  # Clase que crearás para MongoDB
+        self.mongo_manager = MongoManager()
+        self.clicks = clicks
         self.category_urls = {
             'smartphones': 'https://www.alkosto.com/celulares/smartphones/c/BI_101_ALKOS',
             'portatiles': 'https://www.alkosto.com/computadores-tablet/computadores-portatiles/c/BI_104_ALKOS',
@@ -28,18 +29,21 @@ class AlkostoCrawler:
         """Crawlea una categoría específica"""
         print(f"\n🚀 Iniciando crawling de: {category_name}")
         print(f"📁 URL: {url}")
+        print(f"🔢 Modo: {'TODOS los productos' if self.clicks is None else f'{self.clicks} clicks'}")
 
-        products, error = self.scraper.scrape_products(url, category_name)
+        # Pasar el parámetro clicks al scraper
+        products, error = self.scraper.scrape_products(url, category_name, clicks=self.clicks)
 
         if error:
             print(f"❌ Error en {category_name}: {error}")
             return []
 
-        print(f"✅ {len(products)} productos scrapeados de {category_name}")
+        print(f"✅ {len(products)} productos con descuento encontrados en {category_name}")
 
         # Guardar en MongoDB
         if products:
-            self.mongo_manager.save_products(products, category_name)
+            saved_count = self.mongo_manager.save_products(products, category_name)
+            print(f"💾 {saved_count} productos guardados en MongoDB")
 
         return products
 
@@ -52,7 +56,7 @@ class AlkostoCrawler:
             all_products.extend(products)
             time.sleep(2)  # Pausa entre categorías
 
-        print(f"\n🎉 Crawling completado! Total: {len(all_products)} productos")
+        print(f"\n🎉 Crawling completado! Total: {len(all_products)} productos con descuento")
         return all_products
 
     def crawl_specific_categories(self, categories):

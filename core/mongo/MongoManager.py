@@ -1,4 +1,4 @@
-# core/Mongo/MongoManager.py
+# core/mongo/MongoManager.py
 import pymongo
 from pymongo import MongoClient, UpdateOne
 from datetime import datetime, timedelta
@@ -7,7 +7,7 @@ from typing import List, Optional
 from bson import ObjectId
 
 # Importar los schemas Pydantic
-from .schemas import ProductBase, ProductResponse, ProductUpdate
+from .Schemas import ProductBase, ProductResponse, ProductUpdate
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -235,3 +235,33 @@ class MongoManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Cierra conexión al salir del context manager"""
         self.close_connection()
+
+    def get_all_products(self, limit=10000):
+        """Obtiene todos los productos de la base de datos"""
+        try:
+            return list(self.products_collection.find({}).limit(limit))
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo todos los productos: {e}")
+            return []
+
+    def search_products_by_spec(self, spec_key, spec_value, limit=10):
+        """Busca productos por especificación específica"""
+        try:
+            query = {f"specifications.{spec_key}": {"$regex": spec_value, "$options": "i"}}
+            products = list(self.products_collection.find(query).limit(limit))
+            return [ProductResponse(**p) for p in products]
+        except Exception as e:
+            logger.error(f"❌ Error buscando por especificación: {e}")
+            return []
+
+    def search_products_by_price_range(self, min_price, max_price, limit=10):
+        """Busca productos por rango de precio"""
+        try:
+            query = {
+                "discount_price_num": {"$gte": min_price, "$lte": max_price}
+            }
+            products = list(self.products_collection.find(query).limit(limit))
+            return [ProductResponse(**p) for p in products]
+        except Exception as e:
+            logger.error(f"❌ Error buscando por precio: {e}")
+            return []
