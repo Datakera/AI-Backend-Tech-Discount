@@ -1,3 +1,6 @@
+numpy
+datasets
+peft
 asgiref==3.9.1
 beautifulsoup4==4.13.4
 chromadb==1.0.20

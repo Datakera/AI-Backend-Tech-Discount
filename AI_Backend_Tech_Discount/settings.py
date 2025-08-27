@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from xml.etree.ElementTree import XMLID
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -134,6 +135,3 @@ load_dotenv()
 #Cargar mongo
 MONGODB_CONNECTION_STRING = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
 MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'alkosto_db')
-
-# Configuración de OpenAI
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
