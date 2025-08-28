@@ -103,4 +103,4 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS('\n✅ SIGUIENTE PASO:')
         )
-        self.stdout.write('Ejecute: python manage.py train_chatbot')
+        self.stdout.write('Ejecute: python manage.py test_chatbot --interactive')

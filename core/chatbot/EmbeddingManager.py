@@ -49,6 +49,7 @@ class EmbeddingManager:
             f"Categoría: {product.get('category', '')}",
             f"Precio: {product.get('discount_price_num', product.get('original_price_num', 0))}",
             f"Descuento: {product.get('discount_percent', '0%')}",
+            f"Tienda: {product.get('source', 'alkosto')}",
         ]
 
         # Incluir todas las especificaciones
