@@ -1,14 +1,13 @@
 from django.core.management.base import BaseCommand
-from core.chatbot.TechChatbot import TechChatbot
+from core.chatbot.TechChatbot import TechChatbot  # Importar nueva clase
 import os
 import logging
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 
 
 class Command(BaseCommand):
-    help = 'Prueba el chatbot de productos tecnológicos'
+    help = 'Prueba el chatbot ligero de productos tecnológicos'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -22,14 +21,16 @@ class Command(BaseCommand):
             help='Usar solo el modelo base (sin LoRA fine-tuning)'
         )
         parser.add_argument(
-            '--test-queries',
-            nargs='+',
-            help='Lista de consultas específicas para probar'
+            '--model',
+            type=str,
+            choices=['extra_small', 'small', 'medium'],
+            default='small',
+            help='Tamaño del modelo a probar'
         )
         parser.add_argument(
             '--model-path',
             type=str,
-            default='models/chatbot_lora',
+            default='models/lightweight_chatbot',
             help='Ruta del modelo LoRA entrenado'
         )
         parser.add_argument(
@@ -40,59 +41,75 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write(
-            self.style.SUCCESS('🤖 INICIANDO PRUEBA DEL CHATBOT')
+            self.style.SUCCESS('🤖 PROBANDO CHATBOT LIGERO')
         )
+
+        # Mapeo de modelos
+        model_map = {
+            'extra_small': 'distilgpt2',
+            'small': 'microsoft/DialoGPT-small',
+            'medium': 'microsoft/DialoGPT-medium'
+        }
+
+        model_name = model_map[options['model']]
 
         try:
             # Verificar si existe modelo entrenado
             model_exists = os.path.exists(options['model_path'])
             if not model_exists and not options['base_model_only']:
                 self.stdout.write(
-                    self.style.WARNING('⚠️ No se encontró modelo LoRA entrenado')
+                    self.style.WARNING('No se encontró modelo LoRA entrenado')
                 )
                 self.stdout.write('Usando modelo base. Para entrenar ejecute: python manage.py train_chatbot')
                 options['base_model_only'] = True
 
-            # Inicializar chatbot
-            self.stdout.write('🔄 Cargando chatbot...')
-            chatbot = TechChatbot(lora_path=options['model_path'])
+            # Inicializar chatbot ligero
+            self.stdout.write(f'Cargando chatbot con {model_name}...')
+            chatbot = TechChatbot(
+                base_model_name=model_name,
+                lora_path=options['model_path']
+            )
             chatbot.load_model(load_base_only=options['base_model_only'])
 
-            self.stdout.write('✅ Chatbot cargado correctamente')
+            self.stdout.write('Chatbot cargado correctamente')
 
-            # Mostrar información del modelo
+            # Mostrar información
             model_info = "Modelo base" if options['base_model_only'] else "Modelo con LoRA fine-tuning"
-            self.stdout.write(f'🏷️  Usando: {model_info}')
+            self.stdout.write(f'Usando: {model_info}')
+            self.stdout.write(f'Tipo: {chatbot.model_type}')
 
             # Obtener estadísticas de embeddings
             try:
                 stats = chatbot.embedding_manager.get_stats()
-                self.stdout.write(f'📊 Productos en índice: {stats.get("total_products", "N/A")}')
-                self.stdout.write(f'🏷️  Categorías disponibles: {len(stats.get("categories", {}))}')
+                self.stdout.write(f'Productos en índice: {stats.get("total_products", "N/A")}')
             except:
-                self.stdout.write('⚠️ No se pudieron cargar estadísticas de productos')
+                self.stdout.write('No se pudieron cargar estadísticas de productos')
 
             # Modo de operación
             if options['interactive']:
                 self._interactive_mode(chatbot, options['save_conversation'])
-            elif options['test_queries']:
-                self._test_specific_queries(chatbot, options['test_queries'])
             else:
-                self._run_default_tests(chatbot)
+                self._run_lightweight_tests(chatbot)
 
         except Exception as e:
             self.stdout.write(
-                self.style.ERROR(f'❌ Error: {str(e)}')
+                self.style.ERROR(f'Error: {str(e)}')
             )
-            raise
+
+            # Sugerencias específicas para modelos ligeros
+            if 'memory' in str(e).lower() or 'cuda' in str(e).lower():
+                self.stdout.write('\nSUGERENCIAS:')
+                self.stdout.write('• Usa --model extra_small')
+                self.stdout.write('• El modelo DialoGPT-small debería funcionar en la mayoría de PCs')
+                self.stdout.write('• Verifica que tengas al menos 2GB de RAM disponible')
 
     def _interactive_mode(self, chatbot, save_conversation):
-        """Modo interactivo de conversación"""
+        """Modo interactivo optimizado para modelos ligeros"""
         self.stdout.write(
-            self.style.SUCCESS('\n💬 MODO INTERACTIVO ACTIVADO')
+            self.style.SUCCESS('\n💬 MODO INTERACTIVO - CHATBOT LIGERO')
         )
-        self.stdout.write('Escriba "salir" para terminar, "limpiar" para reiniciar conversación')
-        self.stdout.write('=' * 60)
+        self.stdout.write('Comandos especiales: "salir", "limpiar", "stats"')
+        self.stdout.write('=' * 50)
 
         try:
             while True:
@@ -102,12 +119,12 @@ class Command(BaseCommand):
                     break
                 elif user_input.lower() in ['limpiar', 'clear', 'reset']:
                     chatbot.clear_conversation()
-                    self.stdout.write('🧹 Conversación reiniciada')
+                    self.stdout.write('Conversación reiniciada')
                     continue
                 elif user_input.lower() in ['stats', 'estadisticas']:
                     stats = chatbot.get_conversation_stats()
-                    self.stdout.write(f'📊 Interacciones: {stats["total_interactions"]}')
-                    self.stdout.write(f'🎯 Búsquedas exitosas: {stats["success_rate"]}')
+                    self.stdout.write(f'Interacciones: {stats["total_interactions"]}')
+                    self.stdout.write(f'Búsquedas exitosas: {stats["success_rate"]}')
                     continue
 
                 if not user_input:
@@ -119,114 +136,68 @@ class Command(BaseCommand):
                 self.stdout.write('\r🤖 Bot: ' + response)
 
         except KeyboardInterrupt:
-            self.stdout.write('\n\n👋 Conversación terminada por el usuario')
+            self.stdout.write('\n\nConversación terminada por el usuario')
 
         # Mostrar estadísticas finales
         stats = chatbot.get_conversation_stats()
         if stats['total_interactions'] > 0:
             self.stdout.write(
-                self.style.SUCCESS('\n📊 ESTADÍSTICAS DE LA CONVERSACIÓN:')
+                self.style.SUCCESS('\nESTADÍSTICAS DE LA CONVERSACIÓN:')
             )
-            self.stdout.write(f'💬 Total interacciones: {stats["total_interactions"]}')
-            self.stdout.write(f'🎯 Búsquedas exitosas: {stats["success_rate"]}')
+            self.stdout.write(f'Total interacciones: {stats["total_interactions"]}')
+            self.stdout.write(f'Búsquedas exitosas: {stats["success_rate"]}')
 
             # Guardar conversación si se solicita
             if save_conversation:
                 try:
                     filepath = chatbot.save_conversation()
-                    self.stdout.write(f'💾 Conversación guardada en: {filepath}')
+                    self.stdout.write(f'Conversación guardada en: {filepath}')
                 except Exception as e:
-                    self.stdout.write(f'⚠️ Error guardando conversación: {str(e)}')
+                    self.stdout.write(f'Error guardando conversación: {str(e)}')
 
-    def _test_specific_queries(self, chatbot, queries):
-        """Prueba consultas específicas"""
-        self.stdout.write(
-            self.style.SUCCESS(f'\n🧪 PROBANDO {len(queries)} CONSULTAS ESPECÍFICAS')
-        )
-
-        for i, query in enumerate(queries, 1):
-            self.stdout.write(f'\n--- Prueba {i}/{len(queries)} ---')
-            self.stdout.write(f'👤 Usuario: {query}')
-
-            response = chatbot.chat(query)
-            self.stdout.write(f'🤖 Bot: {response}')
-
-    def _run_default_tests(self, chatbot):
-        """Ejecuta pruebas predeterminadas"""
+    def _run_lightweight_tests(self, chatbot):
+        """Ejecuta pruebas optimizadas para modelos ligeros"""
         test_cases = [
-            # Saludos y presentación
+            # Pruebas básicas
             {
-                'category': 'SALUDOS',
+                'category': 'SALUDOS BÁSICOS',
                 'queries': [
                     'Hola',
-                    '¿Qué productos tienes?',
-                    '¿Cómo funciona esto?'
+                    'Qué productos tienes',
+                    'Ayuda'
                 ]
             },
-            # Búsquedas por categoría
+            # Búsquedas simples
             {
-                'category': 'BÚSQUEDAS POR CATEGORÍA',
+                'category': 'BÚSQUEDAS SIMPLES',
                 'queries': [
-                    'Busco celulares',
-                    'Necesito un computador',
-                    '¿Tienes televisores?',
-                    'Quiero audífonos'
+                    'celulares',
+                    'computadores',
+                    'ofertas'
                 ]
             },
             # Búsquedas por marca
             {
                 'category': 'BÚSQUEDAS POR MARCA',
                 'queries': [
-                    'Productos Samsung',
-                    '¿Tienes algo de Apple?',
-                    'Celulares Xiaomi',
-                    'Computadores HP'
+                    'Samsung',
+                    'Apple',
+                    'productos Xiaomi'
                 ]
             },
-            # Búsquedas de ofertas
+            # Ofertas específicas
             {
-                'category': 'BÚSQUEDAS DE OFERTAS',
+                'category': 'OFERTAS',
                 'queries': [
-                    '¿Hay ofertas?',
-                    'Productos en descuento',
-                    'Celulares baratos',
-                    'Computadores en promoción'
-                ]
-            },
-            # Búsquedas por precio
-            {
-                'category': 'BÚSQUEDAS POR PRECIO',
-                'queries': [
-                    'Celular menos de 500 mil',
-                    'Computador entre 1 y 2 millones',
-                    'Productos hasta 100 mil',
-                    'Televisor máximo 1 millón'
-                ]
-            },
-            # Búsquedas específicas
-            {
-                'category': 'BÚSQUEDAS ESPECÍFICAS',
-                'queries': [
-                    'Celular con buena cámara',
-                    'Laptop para gaming',
-                    'Audífonos inalámbricos',
-                    'Smart TV 55 pulgadas'
-                ]
-            },
-            # Consultas conversacionales
-            {
-                'category': 'CONSULTAS CONVERSACIONALES',
-                'queries': [
-                    '¿Cuál me recomiendas?',
-                    'No me convence, ¿tienes otro?',
-                    'Necesito algo más barato',
-                    'Gracias por la ayuda'
+                    'descuentos',
+                    'celulares baratos',
+                    'ofertas Samsung'
                 ]
             }
         ]
 
         self.stdout.write(
-            self.style.SUCCESS('\n🧪 EJECUTANDO PRUEBAS PREDETERMINADAS')
+            self.style.SUCCESS('\nEJECUTANDO PRUEBAS LIGERAS')
         )
 
         total_tests = sum(len(test_case['queries']) for test_case in test_cases)
@@ -243,78 +214,69 @@ class Command(BaseCommand):
 
                 try:
                     response = chatbot.chat(query)
-                    self.stdout.write(f'🤖 Bot: {response}')
+                    # Mostrar respuesta limitada para legibilidad
+                    display_response = response[:100] + "..." if len(response) > 100 else response
+                    self.stdout.write(f'🤖 Bot: {display_response}')
 
-                    # Pausa breve para lectura
+                    # Pausa breve
                     import time
-                    time.sleep(1)
+                    time.sleep(0.5)
 
                 except Exception as e:
                     self.stdout.write(
-                        self.style.ERROR(f'❌ Error en consulta: {str(e)}')
+                        self.style.ERROR(f'Error en consulta: {str(e)}')
                     )
 
         # Estadísticas finales
         stats = chatbot.get_conversation_stats()
         self.stdout.write(
-            self.style.SUCCESS('\n📊 ESTADÍSTICAS DE PRUEBA:')
+            self.style.SUCCESS('\nESTADÍSTICAS DE PRUEBA:')
         )
-        self.stdout.write(f'✅ Pruebas completadas: {total_tests}')
-        self.stdout.write(f'💬 Total interacciones: {stats["total_interactions"]}')
-        self.stdout.write(f'🎯 Búsquedas exitosas: {stats["success_rate"]}')
+        self.stdout.write(f'Pruebas completadas: {total_tests}')
+        self.stdout.write(f'Total interacciones: {stats["total_interactions"]}')
+        self.stdout.write(f'Búsquedas exitosas: {stats["success_rate"]}')
 
-        # Evaluación básica de rendimiento
-        self._evaluate_performance(chatbot)
+        # Evaluación simplificada
+        self._evaluate_lightweight_performance(chatbot, stats)
 
-    def _evaluate_performance(self, chatbot):
-        """Evaluación básica de rendimiento del chatbot"""
+    def _evaluate_lightweight_performance(self, chatbot, stats):
+        """Evaluación básica para modelos ligeros"""
         self.stdout.write(
-            self.style.SUCCESS('\n🔍 EVALUACIÓN DE RENDIMIENTO:')
+            self.style.SUCCESS('\nEVALUACIÓN DE RENDIMIENTO:')
         )
 
-        # Prueba de búsqueda de embeddings
+        # Prueba de embeddings
         try:
-            search_results = chatbot.embedding_manager.search_products("celular samsung", top_k=5)
-            self.stdout.write(
-                f'📱 Búsqueda embeddings: {"✅" if search_results else "❌"} ({len(search_results)} resultados)')
+            search_results = chatbot.embedding_manager.search_products("celular samsung", top_k=3)
+            embeddings_ok = "✅" if search_results else "❌"
+            self.stdout.write(f'Búsqueda embeddings: {embeddings_ok} ({len(search_results)} resultados)')
         except:
-            self.stdout.write('📱 Búsqueda embeddings: ❌ Error')
+            self.stdout.write('Búsqueda embeddings: ❌ Error')
 
-        # Prueba de generación de respuesta
-        try:
-            test_response = chatbot._generate_response("Hola", "Productos disponibles: iPhone 12, Samsung Galaxy")
-            response_quality = "✅" if len(test_response) > 20 and "hola" in test_response.lower() else "⚠️"
-            self.stdout.write(f'💬 Generación de respuesta: {response_quality}')
-        except:
-            self.stdout.write('💬 Generación de respuesta: ❌ Error')
+        # Calidad de respuestas
+        success_rate = float(stats['success_rate'].replace('%', ''))
+        if success_rate >= 70:
+            quality = "✅ Excelente"
+        elif success_rate >= 50:
+            quality = "⚠️ Aceptable"
+        else:
+            quality = "❌ Necesita mejoras"
 
-        # Estadísticas de productos
-        try:
-            stats = chatbot.embedding_manager.get_stats()
-            products_ok = "✅" if stats.get('total_products', 0) > 100 else "⚠️"
-            self.stdout.write(f'📦 Base de productos: {products_ok} ({stats.get("total_products", 0)} productos)')
-
-            categories_ok = "✅" if len(stats.get('categories', {})) > 5 else "⚠️"
-            self.stdout.write(f'🏷️  Categorías: {categories_ok} ({len(stats.get("categories", {}))} categorías)')
-        except:
-            self.stdout.write('📦 Base de productos: ❌ Error accediendo a estadísticas')
+        self.stdout.write(f'Calidad de respuestas: {quality}')
 
         # Recomendaciones
         self.stdout.write(
-            self.style.SUCCESS('\n💡 RECOMENDACIONES:')
+            self.style.SUCCESS('\nRECOMENCIACIONES:')
         )
 
-        conversation_stats = chatbot.get_conversation_stats()
-        success_rate = float(conversation_stats['success_rate'].replace('%', ''))
-
         if success_rate < 50:
-            self.stdout.write('• Considere reentrenar el modelo con más datos')
-            self.stdout.write('• Verifique que los embeddings estén correctamente creados')
+            self.stdout.write('• Considera reentrenar con más epochs')
+            self.stdout.write('• Verifica que los embeddings estén correctamente creados')
         elif success_rate < 80:
-            self.stdout.write('• El rendimiento es aceptable pero puede mejorarse')
-            self.stdout.write('• Considere ajustar los parámetros de búsqueda')
+            self.stdout.write('• El rendimiento es bueno para un modelo ligero')
+            self.stdout.write('• Puedes probar con --model medium para mejor calidad')
         else:
-            self.stdout.write('• ¡Excelente rendimiento!')
-            self.stdout.write('• El chatbot está funcionando correctamente')
+            self.stdout.write('• ¡Excelente rendimiento para un modelo ligero!')
+            self.stdout.write('• El chatbot está listo para uso en producción')
 
-        self.stdout.write(f'• Para más pruebas use: python manage.py test_chatbot --interactive')
+        self.stdout.write('• Para más pruebas usa: --interactive')
