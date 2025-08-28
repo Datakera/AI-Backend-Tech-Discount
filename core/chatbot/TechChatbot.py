@@ -1,267 +1,185 @@
 import os
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
 import logging
 from typing import List, Dict
+from groq import Groq
 from .EmbeddingManager import EmbeddingManager
-import re
 
 logger = logging.getLogger(__name__)
 
 
 class TechChatbot:
-    """Chatbot para productos tecnológicos con búsqueda semántica"""
+    """Chatbot usando Groq SDK oficial con embeddings locales"""
 
-    def __init__(self, base_model_name: str = "microsoft/DialoGPT-medium",
-                 lora_path: str = "models/tech_chatbot"):
-        self.base_model_name = base_model_name
-        self.lora_path = lora_path
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.tokenizer = None
-        self.model = None
+    def __init__(self, groq_api_key: str = None):
+        self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
         self.embedding_manager = EmbeddingManager()
-
         self.conversation_history = []
-        self.max_history = 5
 
-        logger.info(f"Inicializando chatbot en {self.device}")
+        if not self.groq_api_key:
+            logger.warning("⚠️ GROQ_API_KEY no encontrada. Usa environment variable o pásala al constructor.")
+            self.client = None
+        else:
+            self.client = Groq(api_key=self.groq_api_key)
 
-    def load_model(self, load_base_only: bool = False):
-        """Carga el modelo"""
+    def generate_response(self, user_input: str, product_info: List[Dict] = None) -> str:
+        """Genera respuesta usando Groq SDK con contexto de productos"""
         try:
-            logger.info("Cargando modelo...")
+            if not self.client:
+                return self._fallback_response(user_input, product_info)
 
-            # Cargar tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name)
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+            # Construir el mensaje con contexto
+            messages = self._build_messages(user_input, product_info)
 
-            if not load_base_only and os.path.exists(self.lora_path):
-                # Cargar modelo base + LoRA
-                base_model = AutoModelForCausalLM.from_pretrained(
-                    self.base_model_name,
-                    torch_dtype=torch.float32,
-                    device_map="auto" if torch.cuda.is_available() else None
-                )
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model="llama-3.3-70b-versatile",  # ✅ Modelo mejorado
+                temperature=0.7,
+                max_tokens=500,
+                top_p=0.9
+            )
 
-                self.model = PeftModel.from_pretrained(
-                    base_model,
-                    self.lora_path,
-                    torch_dtype=torch.float32
-                )
-                logger.info("✅ Modelo con fine-tuning cargado")
-            else:
-                # Solo modelo base
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    self.base_model_name,
-                    torch_dtype=torch.float32,
-                    device_map="auto" if torch.cuda.is_available() else None
-                )
-                logger.info("✅ Modelo base cargado")
-
-            if not torch.cuda.is_available():
-                self.model = self.model.to(self.device)
-
-            self.model.eval()
+            return chat_completion.choices[0].message.content
 
         except Exception as e:
-            logger.error(f"Error cargando modelo: {e}")
-            raise
+            logger.error(f"❌ Error con Groq API: {e}")
+            return self._fallback_response(user_input, product_info)
 
-    def _extract_search_intent(self, user_input: str) -> Dict:
-        """Extrae intención de búsqueda"""
-        intent = {
-            'query': user_input.lower(),
-            'category': None,
-            'brand': None,
-            'looking_for_deals': False
-        }
+    def _build_messages(self, user_input: str, product_info: List[Dict] = None) -> List[Dict]:
+        """Construye los mensajes para la API de Groq"""
+        system_prompt = """Eres un asistente virtual especializado en productos tecnológicos de una tienda online.
+Eres amable, profesional y servicial. Usa emojis apropiados y mantén un tono conversacional.
 
-        # Detectar categorías
-        categories = {
-            'celulares': ['celular', 'teléfono', 'smartphone', 'móvil'],
-            'computadores': ['computador', 'pc', 'laptop', 'portátil', 'notebook'],
-            'televisores': ['tv', 'televisor', 'televisión', 'pantalla'],
-            'tablets': ['tablet', 'ipad'],
-            'audífonos': ['audífonos', 'auriculares', 'headphones']
-        }
+DIRECTRICES IMPORTANTES:
+1. Responde en español perfecto
+2. Sé conciso pero informativo (máximo 2-3 párrafos)
+3. Si hay productos relevantes, menciónalos naturalmente con sus características
+4. Incluye URLs e imágenes cuando sea relevante
+5. Si no hay productos exactos, sugiere alternativas similares
+6. Mantén un tono entusiasta pero profesional
+7. Usa formato de texto amigable (no markdown)
 
-        for category, keywords in categories.items():
-            if any(keyword in intent['query'] for keyword in keywords):
-                intent['category'] = category
-                break
+Ejemplo de respuestas buenas:
+- "¡Perfecto! Tengo este Samsung Galaxy S23 por $2,500,000 con 256GB 💫"
+- "No encontré exactamente lo que buscas, pero te recomiendo estas alternativas similares..."
+- "¡Hola! 👋 ¿Buscas algún producto tecnológico en especial hoy?"
+"""
 
-        # Detectar marcas
-        brands = ['samsung', 'apple', 'xiaomi', 'huawei', 'lg', 'sony', 'lenovo', 'hp', 'dell']
-        for brand in brands:
-            if brand in intent['query']:
-                intent['brand'] = brand
-                break
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
 
-        # Detectar ofertas
-        deal_keywords = ['oferta', 'descuento', 'barato', 'promoción', 'rebaja']
-        if any(keyword in intent['query'] for keyword in deal_keywords):
-            intent['looking_for_deals'] = True
-
-        return intent
-
-    def _search_products(self, intent: Dict, top_k: int = 3) -> List[Dict]:
-        """Busca productos basado en la intención"""
-        try:
-            if intent['category']:
-                query = intent['category']
-                if intent['brand']:
-                    query += f" {intent['brand']}"
-                if intent['looking_for_deals']:
-                    query += " oferta descuento"
-
-                return self.embedding_manager.search_products(query, top_k=top_k)
-            else:
-                return self.embedding_manager.search_by_category_and_price(
-                    category=intent['category'],
-                    with_discount=intent['looking_for_deals'],
-                    top_k=top_k
-                )
-        except Exception as e:
-            logger.error(f"Error en búsqueda: {e}")
-            return []
-
-    def _format_products_context(self, products: List[Dict]) -> str:
-        """Formatea productos para el contexto"""
-        if not products:
-            return "No encontré productos específicos, pero puedo ayudarte con información general."
-
-        context = "Productos relevantes:\n"
-        for i, product in enumerate(products[:3], 1):
-            price = product.get('price', 0)
-            discount = product.get('discount_percent', '0%')
-
-            context += f"{i}. {product['name']} - {product['brand']} - ${price:,.0f}"
-            if discount != '0%':
-                context += f" ({discount} descuento)"
-            context += "\n"
-
-        return context
-
-    def _generate_response(self, user_input: str, products_context: str) -> str:
-        """Genera respuesta usando el modelo"""
-        try:
-            # Crear prompt
-            prompt = self._create_prompt(user_input, products_context)
-
-            # Tokenizar
-            inputs = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                max_length=512,
-                truncation=True,
-                padding=True
-            ).to(self.device)
-
-            # Generar
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=100,
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1
-                )
-
-            # Decodificar y limpiar
-            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            response = response.replace(prompt, "").strip()
-            response = self._clean_response(response)
-
-            return response if response else "¿En qué más puedo ayudarte?"
-
-        except Exception as e:
-            logger.error(f"Error generando respuesta: {e}")
-            return "Lo siento, tuve un problema. ¿Podrías intentarlo de nuevo?"
-
-    def _create_prompt(self, user_input: str, products_context: str) -> str:
-        """Crea el prompt para el modelo"""
-        # Historial de conversación
-        history = ""
-        for conv in self.conversation_history[-self.max_history:]:
-            history += f"Usuario: {conv['user']}{self.tokenizer.eos_token}"
-            history += f"Asistente: {conv['assistant']}{self.tokenizer.eos_token}"
-
-        # Prompt completo
-        prompt = f"{history}Usuario: {user_input}{self.tokenizer.eos_token}"
-
-        if "No encontré" not in products_context:
-            prompt = f"Contexto: {products_context}\n{prompt}"
-
-        prompt += "Asistente:"
-
-        return prompt
-
-    def _clean_response(self, response: str) -> str:
-        """Limpia la respuesta generada"""
-        # Remover texto no deseado
-        response = re.sub(r'\d{10,}', '', response)  # Remover números largos
-        response = re.sub(r'http\S+', '', response)  # Remover URLs
-        response = re.sub(r'\s+', ' ', response).strip()  # Normalizar espacios
-
-        # Cortar en el primer signo de puntuación fuerte
-        for cutoff in ['.', '!', '?', '\n']:
-            if cutoff in response:
-                response = response.split(cutoff)[0] + cutoff
-                break
-
-        return response
-
-    def chat(self, user_input: str) -> str:
-        """Maneja la conversación"""
-        try:
-            # Extraer intención
-            intent = self._extract_search_intent(user_input)
-
-            # Buscar productos
-            products = self._search_products(intent)
-
-            # Formatear contexto
-            products_context = self._format_products_context(products)
-
-            # Generar respuesta
-            response = self._generate_response(user_input, products_context)
-
-            # Actualizar historial
-            self.conversation_history.append({
-                'user': user_input,
-                'assistant': response,
-                'products_found': len(products)
+        # Agregar historial de conversación (últimos 4 mensajes)
+        for msg in self.conversation_history[-8:]:  # 4 interacciones
+            messages.append({
+                "role": "user" if msg["type"] == "user" else "assistant",
+                "content": msg["content"]
             })
 
-            # Limitar historial
-            if len(self.conversation_history) > self.max_history:
-                self.conversation_history = self.conversation_history[-self.max_history:]
+        # Agregar contexto de productos si existe
+        if product_info:
+            product_context = self._format_products_for_prompt(product_info)
+            messages.append({
+                "role": "system",
+                "content": f"CONTEXTO DE PRODUCTOS DISPONIBLES:\n{product_context}\n\nResponde mencionando los productos más relevantes de forma natural."
+            })
 
+        # Agregar el mensaje actual del usuario
+        messages.append({"role": "user", "content": user_input})
+
+        return messages
+
+    def _format_products_for_prompt(self, products: List[Dict]) -> str:
+        """Formatea productos para el prompt de manera eficiente"""
+        if not products:
+            return "No hay productos disponibles que coincidan con la búsqueda."
+
+        formatted_products = []
+        for i, product in enumerate(products[:4]):  # Máximo 4 productos
+            product_str = f"🎯 PRODUCTO {i + 1}:\n"
+            product_str += f"   Nombre: {product.get('name', 'Sin nombre')}\n"
+            product_str += f"   Marca: {product.get('brand', 'Marca no especificada')}\n"
+            product_str += f"   Precio: ${product.get('price', 0):,.0f}\n"
+
+            if product.get('discount_percent') not in [None, '0%', '0']:
+                product_str += f"   Descuento: {product.get('discount_percent')}\n"
+
+            product_str += f"   Categoría: {product.get('category', 'Sin categoría')}\n"
+
+            # Agregar specs importantes
+            specs = product.get('specifications', {})
+            if specs:
+                product_str += "   Especificaciones:\n"
+                for key in ['RAM', 'Almacenamiento', 'Procesador', 'Pantalla', 'Memoria']:
+                    if key in specs:
+                        product_str += f"     - {key}: {specs[key]}\n"
+
+            product_str += f"   URL: {product.get('product_url', 'No disponible')}\n"
+            product_str += f"   Imagen: {product.get('image_url', 'No disponible')}\n"
+
+            formatted_products.append(product_str)
+
+        return "\n" + "\n".join(formatted_products)
+
+    def _fallback_response(self, user_input: str, product_info: List[Dict] = None) -> str:
+        """Respuesta de fallback si la API falla"""
+        if product_info:
+            product = product_info[0]
+            return (
+                f"¡Hola! Encontré {product.get('name', 'un producto')} de {product.get('brand', 'marca reconocida')} "
+                f"por ${product.get('price', 0):,.0f}. ¿Te interesa que te dé más detalles o busco otras opciones?"
+            )
+        else:
+            return "¡Hola! 👋 Soy tu asistente de tecnología. ¿En qué puedo ayudarte hoy? Puedo buscarte productos tecnológicos, comparar precios o mostrarte ofertas."
+
+    def chat(self, user_input: str) -> str:
+        """Flujo completo de chat con embeddings + Groq"""
+        try:
+            logger.info(f"👤 Usuario: {user_input}")
+
+            # 1. Buscar productos relevantes
+            products = self.embedding_manager.search_products(user_input, top_k=4, threshold=0.25)
+
+            # 2. Generar respuesta con Groq
+            response = self.generate_response(user_input, products)
+
+            # 3. Guardar en historial
+            self.conversation_history.append({
+                "type": "user",
+                "content": user_input,
+                "products_found": len(products)
+            })
+            self.conversation_history.append({
+                "type": "assistant",
+                "content": response
+            })
+
+            # Limitar historial para no exceder contexto
+            self.conversation_history = self.conversation_history[-12:]
+
+            logger.info(f"🤖 Asistente: {response}")
             return response
 
         except Exception as e:
-            logger.error(f"Error en chat: {e}")
-            return "Lo siento, ocurrió un error. ¿Podrías intentarlo de nuevo?"
+            logger.error(f"❌ Error en chat: {e}")
+            return "¡Disculpa! Estoy teniendo problemas técnicos momentáneos. ¿Podrías intentarlo de nuevo en un momento?"
 
-    def clear_conversation(self):
-        """Limpia el historial"""
+    def clear_history(self):
+        """Limpia el historial de conversación"""
         self.conversation_history = []
 
-    def get_conversation_stats(self) -> Dict:
+    def get_chat_stats(self) -> Dict:
         """Estadísticas de la conversación"""
-        if not self.conversation_history:
-            return {"total_interactions": 0, "success_rate": "0%"}
-
-        total = len(self.conversation_history)
-        successful = sum(1 for conv in self.conversation_history if conv.get('products_found', 0) > 0)
-
         return {
-            "total_interactions": total,
-            "successful_searches": successful,
-            "success_rate": f"{(successful / total * 100):.1f}%" if total > 0 else "0%"
+            "total_messages": len(self.conversation_history),
+            "user_messages": sum(1 for msg in self.conversation_history if msg["type"] == "user"),
+            "assistant_messages": sum(1 for msg in self.conversation_history if msg["type"] == "assistant"),
+            "last_products_found": self.conversation_history[-2]["products_found"] if len(
+                self.conversation_history) >= 2 else 0
         }
+
+    def quick_test(self, test_query: str = "hola") -> str:
+        """Prueba rápida del chatbot"""
+        try:
+            return self.chat(test_query)
+        except Exception as e:
+            return f"Error en prueba: {e}"

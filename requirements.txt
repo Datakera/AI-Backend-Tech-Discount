@@ -1,4 +1,5 @@
 numpy
+groq
 datasets
 peft
 asgiref==3.9.1

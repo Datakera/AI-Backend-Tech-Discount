@@ -42,31 +42,19 @@ class EmbeddingManager:
             raise
 
     def _create_product_text(self, product: Dict) -> str:
-        """Crea texto representativo del producto para embedding"""
-        # Crear texto combinando campos importantes
+        """Crea texto completo para embeddings"""
         text_parts = [
-            f"Producto: {product.get('name', '')}",
-            f"Marca: {product.get('brand', 'Sin marca')}",
-            f"Categoría: {product.get('category', 'Sin categoría')}",
-            f"Precio: ${product.get('discount_price_num', product.get('original_price_num', 0))}",
+            f"Nombre: {product.get('name', '')}",
+            f"Marca: {product.get('brand', '')}",
+            f"Categoría: {product.get('category', '')}",
+            f"Precio: {product.get('discount_price_num', product.get('original_price_num', 0))}",
+            f"Descuento: {product.get('discount_percent', '0%')}",
         ]
 
-        # Agregar descuento si existe
-        discount = product.get('discount_percent', '0%')
-        if discount != '0%':
-            text_parts.append(f"Descuento: {discount}")
-
-        # Agregar especificaciones importantes
+        # Incluir todas las especificaciones
         specs = product.get('specifications', {})
-        if specs:
-            important_specs = []
-            for key, value in specs.items():
-                if any(keyword in key.lower() for keyword in
-                       ['ram', 'almacenamiento', 'pantalla', 'procesador', 'memoria']):
-                    important_specs.append(f"{key}: {value}")
-
-            if important_specs:
-                text_parts.extend(important_specs[:3])  # Máximo 3 especificaciones
+        for key, value in specs.items():
+            text_parts.append(f"{key}: {value}")
 
         return " | ".join(text_parts)
 
