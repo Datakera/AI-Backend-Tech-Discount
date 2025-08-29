@@ -22,6 +22,7 @@ class AlkostoCrawler:
             'accesorios_tv': 'https://www.alkosto.com/accesorios-electronica/accesorios-tv-video/c/BI_123_ALKOS',
             'consolas': 'https://www.alkosto.com/videojuegos/consolas/c/BI_131_ALKOS',
             'accesorios_videojuegos': 'https://www.alkosto.com/videojuegos/accesorios-videojuegos/c/BI_133_ALKOS',
+            'audifonos': 'https://www.alkosto.com/audio/audifonos/c/BI_111_ALKOS',
             'casa_inteligente': 'https://www.alkosto.com/casa-inteligente-domotica/c/BI_CAIN_ALKOS'
         }
 

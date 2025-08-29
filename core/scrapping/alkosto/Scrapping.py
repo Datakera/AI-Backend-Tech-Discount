@@ -87,6 +87,7 @@ class AlkostoScraper:
                 'accesorios-electronica/accesorios-tv-video': 'Accesorios TV',
                 'videojuegos/consolas': 'Consolas',
                 'videojuegos/accesorios-videojuegos': 'Accesorios Videojuegos',
+                'audio / audifonos': 'Audífonos',
                 'casa-inteligente-domotica': 'Casa Inteligente'
             }
 
