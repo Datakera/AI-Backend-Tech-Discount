@@ -492,3 +492,14 @@ class EmbeddingManager:
             'products_with_discount': with_discount,
             'discount_percentage': f"{(with_discount / len(self.product_metadata) * 100):.1f}%" if self.product_metadata else "0%"
         }
+
+    def get_all_products_from_index(self) -> List[Dict]:
+        """Obtiene todos los productos del índice (sin búsqueda)"""
+        try:
+            if not self.product_metadata:
+                logger.warning("No hay metadata de productos disponible")
+                return []
+            return self.product_metadata.copy()  # Devolver copia para no modificar el original
+        except Exception as e:
+            logger.error(f"Error obteniendo todos los productos: {e}")
+            return []
