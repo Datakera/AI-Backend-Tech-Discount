@@ -13,19 +13,19 @@ class Command(BaseCommand):
             help='Activa el modo de chat interactivo'
         )
         parser.add_argument(
-            '--api-key',
+            '--api_chatbot-key',
             type=str,
             help='Tu API key de Groq (opcional, puede usarse env variable)'
         )
 
     def handle(self, *args, **options):
         # Obtener API key de argumento o environment variable
-        api_key = options['api_key'] or os.getenv('GROQ_API_KEY')
+        api_key = options.get('api_chatbot_key') or os.getenv('GROQ_API_KEY')
 
         if not api_key:
             self.stdout.write(self.style.ERROR(
                 "❌ No se encontró API key de Groq. Usa:\n"
-                "   --api-key TU_API_KEY\n"
+                "   --api_chatbot-key TU_API_KEY\n"
                 "   o configura la variable de entorno GROQ_API_KEY"
             ))
             return

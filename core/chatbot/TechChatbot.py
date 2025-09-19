@@ -37,9 +37,9 @@ class TechChatbot:
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
                 model="llama-3.3-70b-versatile",
-                temperature=0.3,  # ✅ Temperatura más baja para reducir invención
-                max_tokens=800,  # ✅ Aumentado para que quepan más productos
-                top_p=0.8
+                temperature=0.5,
+                max_tokens=1200,
+                top_p=0.9
             )
 
             response = chat_completion.choices[0].message.content
@@ -67,25 +67,35 @@ class TechChatbot:
         3. NUNCA inventes productos, precios, descuentos, especificaciones o tiendas
         4. Menciona los nombres de productos TAL CUAL aparecen en el contexto
         5. Incluye siempre la marca y modelo específico del producto
-        6. Los enlaces y disponibilidad deben ser EXACTAMENTE los del contexto
-        7. SIEMPRE ofrece ayuda adicional al final de tu respuesta
-        8. Sé proactivo y amigable, como un buen asistente
+        6. **SIEMPRE incluye el enlace (URL) del producto cuando esté disponible**
+        7. Los enlaces y disponibilidad deben ser EXACTAMENTE los del contexto
+        8. **SIEMPRE ofrece ayuda adicional al final de tu respuesta**
+        9. Sé proactivo y amigable, como un buen asistente
 
         INFORMACIÓN DISPONIBLE ACTUALMENTE:
         - Tiendas: {stores_text}
         - Productos encontrados: {len(product_info) if product_info else 0}
 
-        IMPORTANTE: 
-        - Muestra los productos más relevantes (hasta 5) 
-        - Al final de cada respuesta, ofrece tu ayuda para seguir buscando o para más detalles
-        - Sé proactivo y ofrece ayuda para comparar, elegir o obtener más información
+        ESTRUCTURA OBLIGATORIA de tu respuesta:
+        1. 🎯 Saludo amable y confirmación de lo encontrado
+        2. 📋 Lista de productos (hasta 5) con formato:
+           **Nombre Producto** - Marca | Precio: $X | Descuento: Y% | [Ver Producto](URL)
+        3. ❓ OFRECER AYUDA adicional con preguntas específicas como:
+           - "¿Te gustaría que te ayude a comparar estos modelos?"
+           - "¿Necesitas más información sobre alguno en particular?"
+           - "¿Quieres que busque opciones con características específicas?"
+           - "¿Te interesa saber sobre disponibilidad o envío?"
 
-        EJEMPLO CORRECTO:
-        "💻 En Alkosto encontré 'Computador Portátil Gamer HP Victus 15.6 Pulgadas Fb2024la AMD Ryzen 5' por $5,399,000. 
-        ¿Te gustaría que te ayude a comparar modelos o necesitas más información sobre este?"
+        EJEMPLO CORRECTO COMPLETO:
+        "¡Claro que sí! 💻 En Alkosto encontré varios portátiles gamer que podrían interesarte:
 
-        EJEMPLO INCORRECTO:
-        "💻 En Alkosto encontré 'Computador Portátil Gamer HP Victus 15.6 Pulgadas Fb2024la AMD Ryzen 5' por $5,399,000."
+        **Computador Portátil Gamer HP Victus 15.6"** - HP | Precio: $5,399,000 | Descuento: 33% OFF | [Ver Producto](https://www.alkosto.com/producto)
+        **Computador Portátil Gamer HP Victus 15"** - HP | Precio: $3,699,000 | Descuento: 32% OFF | [Ver Producto](https://www.alkosto.com/producto)
+
+        ¿Te gustaría que te ayude a comparar estos modelos o necesitas más información sobre especificaciones técnicas? También puedo buscarte opciones con diferentes presupuestos. ¡Estoy aquí para ayudarte! 🚀"
+
+        EJEMPLO INCORRECTO (sin ayuda final):
+        "En Alkosto: Producto A $X, Producto B $Y"
         """
 
         messages = [
@@ -115,15 +125,16 @@ class TechChatbot:
         return messages
 
     def _format_products_for_prompt(self, products: List[Dict]) -> str:
-        """Formatea productos para el prompt de manera más concisa"""
+        """Formatea productos para el prompt INCLUYENDO URLs"""
         if not products:
             return "No hay productos disponibles para esta búsqueda."
 
         formatted_products = []
         for i, product in enumerate(products[:5]):  # Hasta 5 productos
             store = product.get('source', 'alkosto').upper()
+            product_url = product.get('product_url', 'URL no disponible')
 
-            # Formato más conciso
+            # Formato con URL
             product_str = f"{store} - {product.get('name', 'Sin nombre')}"
             product_str += f" | ${product.get('price', 0):,.0f}"
 
@@ -131,9 +142,11 @@ class TechChatbot:
             if discount not in [None, '0%', '0']:
                 product_str += f" ({discount} OFF)"
 
+            product_str += f" | URL: {product_url}"  # ← INCLUIR URL
+
             formatted_products.append(product_str)
 
-        return "PRODUCTOS DISPONIBLES:\n" + "\n".join(formatted_products)
+        return "PRODUCTOS DISPONIBLES (INCLUIR ENLACES):\n" + "\n".join(formatted_products)
 
     def _get_available_stores(self, product_info: List[Dict] = None) -> List[str]:
         """Obtiene las tiendas disponibles DINÁMICAMENTE de la base de datos"""
